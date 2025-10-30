@@ -1,40 +1,29 @@
 import React, { useState, useEffect } from 'react';
-// Íconos (incluyendo LogOut)
+// Íconos (los mismos de antes)
 import { Plus, Edit2, Trash2, Package, ShoppingCart, DollarSign, Search, TrendingDown, TrendingUp, LogOut } from 'lucide-react';
 import { supabase } from './supabaseClient'; 
 
 // ------------------------------------------------------------------
-// COMPONENTE 1: Formulario de Login y Registro
+// COMPONENTE 1: Formulario de Login (MODIFICADO)
 // ------------------------------------------------------------------
 function AuthForm() {
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [isLogin, setIsLogin] = useState(true); // Para cambiar entre Login y Registro
+  // Ya no necesitamos 'isLogin', solo es un formulario de Login
 
   const handleAuth = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
-      let error;
-      if (isLogin) {
-        // --- Iniciar Sesión ---
-        const { error: loginError } = await supabase.auth.signInWithPassword({
-          email: email,
-          password: password,
-        });
-        error = loginError;
-      } else {
-        // --- Registrarse ---
-        const { error: signUpError } = await supabase.auth.signUp({
-          email: email,
-          password: password,
-        });
-        error = signUpError;
-      }
+      // --- Solo Iniciar Sesión ---
+      // Ya no hay lógica de 'signUp'
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email,
+        password: password,
+      });
       if (error) throw error;
-      // Si todo sale bien, el 'onAuthStateChange' en <App> detectará el cambio
-      // y nos llevará a la app principal.
+      // Si todo sale bien, el 'onAuthStateChange' nos logueará
     } catch (error) {
       alert(error.error_description || error.message);
     } finally {
@@ -45,8 +34,9 @@ function AuthForm() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100">
       <div className="p-8 bg-white shadow-lg rounded-lg w-full max-w-sm">
+        {/* Título estático */}
         <h1 className="text-2xl font-bold text-center mb-6">
-          {isLogin ? 'Iniciar Sesión' : 'Registrar Cuenta'}
+          Iniciar Sesión
         </h1>
         <form onSubmit={handleAuth} className="space-y-4">
           <input
@@ -70,35 +60,28 @@ function AuthForm() {
             disabled={loading} 
             className="w-full py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:bg-blue-300"
           >
-            {loading ? 'Cargando...' : (isLogin ? 'Entrar' : 'Registrar')}
+            {loading ? 'Cargando...' : 'Entrar'}
           </button>
         </form>
-        <button
-          onClick={() => setIsLogin(!isLogin)}
-          className="w-full mt-4 text-center text-sm text-blue-600 hover:underline"
-        >
-          {isLogin ? '¿No tienes cuenta? Regístrate' : '¿Ya tienes cuenta? Inicia sesión'}
-        </button>
+        {/* Ya no hay botón para registrarse */}
       </div>
     </div>
   );
 }
 
 // ------------------------------------------------------------------
-// COMPONENTE 2: El "Portero" (Principal)
+// COMPONENTE 2: El "Portero" (Sin cambios)
 // ------------------------------------------------------------------
 export default function App() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // 1. Intenta obtener la sesión actual al cargar la app
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      setLoading(false); // Terminamos de cargar
+      setLoading(false);
     });
 
-    // 2. Escucha cambios en la sesión (Login o Logout)
     const { data: authListener } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         setSession(session);
@@ -106,30 +89,27 @@ export default function App() {
       }
     );
 
-    // 3. Limpia el "escuchador" al desmontar el componente
     return () => {
       authListener.subscription.unsubscribe();
     };
   }, []);
 
-  // Si aún está cargando la sesión, muestra "Cargando..."
   if (loading) {
     return <div className="flex items-center justify-center h-screen">Cargando sesión...</div>;
   }
 
-  // Si NO hay sesión, muestra el formulario de Login
   if (!session) {
     return <AuthForm />;
   } 
   
-  // Si SÍ hay sesión, muestra la app principal
   return <BusinessApp user={session.user} />;
 }
 
 // ------------------------------------------------------------------
-// COMPONENTE 3: La App del Negocio (Toda tu app anterior)
+// COMPONENTE 3: La App del Negocio (Sin cambios)
 // ------------------------------------------------------------------
 function BusinessApp({ user }) {
+  // ... (Todo el código de BusinessApp es idéntico)
   const [productos, setProductos] = useState([]);
   const [ventas, setVentas] = useState([]);
   const [dineroActual, setDineroActual] = useState(0);
@@ -145,31 +125,26 @@ function BusinessApp({ user }) {
   const cargarDatos = async () => {
     setCargando(true);
     try {
-      // 1. Cargar Productos
       const { data: productosData, error: errorProductos } = await supabase
         .from('productos').select('*').order('nombre', { ascending: true }); 
       if (errorProductos) throw errorProductos;
       if (productosData) setProductos(productosData);
 
-      // 2. Cargar Ventas
       const { data: ventasData, error: errorVentas } = await supabase
         .from('ventas').select('*').order('created_at', { ascending: false }); 
       if (errorVentas) throw errorVentas;
       if (ventasData) setVentas(ventasData);
       
-      // 3. Cargar Gastos
       const { data: gastosData, error: errorGastos } = await supabase
         .from('gastos').select('*').order('created_at', { ascending: false }); 
       if (errorGastos) throw errorGastos;
       if (gastosData) setGastos(gastosData);
 
-      // 4. Cargar Reinversiones
       const { data: reinversionesData, error: errorReinversiones } = await supabase
         .from('reinversiones').select('*').order('created_at', { ascending: false });
       if (errorReinversiones) throw errorReinversiones;
       if (reinversionesData) setReinversiones(reinversionesData);
 
-      // 5. Cargar Dinero
       const { data: dineroData, error: errorDinero } = await supabase
         .from('dinero').select('monto').eq('id', 1).single();   
       if (errorDinero) throw errorDinero;
@@ -181,7 +156,6 @@ function BusinessApp({ user }) {
     setCargando(false);
   };
 
-  // NUEVA FUNCIÓN: Cerrar Sesión
   const handleLogout = async () => {
     setCargando(true);
     const { error } = await supabase.auth.signOut();
@@ -214,7 +188,8 @@ function BusinessApp({ user }) {
         
         {/* Fila inferior con botones de navegación */}
         <div className="flex gap-2 overflow-x-auto">
-          <button
+           {/* ... (Botones de navegación idénticos) ... */}
+           <button
             onClick={() => setSeccionActual('inventario')}
             className={`px-4 py-2 rounded flex items-center gap-2 whitespace-nowrap ${
               seccionActual === 'inventario' ? 'bg-blue-800' : 'bg-blue-500'
@@ -281,8 +256,11 @@ function BusinessApp({ user }) {
 
 
 // ------------------------------------------------------------------
-// SECCIÓN 4: INVENTARIO (Tu código original)
+// PEGA AQUÍ LAS 5 SECCIONES (Inventario, Ventas, Gastos, Reinversion, Corte)
 // ------------------------------------------------------------------
+// ... (El código de las 5 secciones es idéntico al que ya tenías) ...
+// ... (Asegúrate de pegarlas aquí) ...
+
 function SeccionInventario({ productos, cargarDatos }) {
   const [mostrarForm, setMostrarForm] = useState(false);
   const [productoEditando, setProductoEditando] = useState(null);
@@ -481,9 +459,6 @@ function SeccionInventario({ productos, cargarDatos }) {
   );
 }
 
-// ------------------------------------------------------------------
-// SECCIÓN 5: VENTAS (Tu código original)
-// ------------------------------------------------------------------
 function SeccionVentas({ productos, ventas, dineroActual, cargarDatos }) {
   const [productoSeleccionado, setProductoSeleccionado] = useState('');
   const [cantidadVenta, setCantidadVenta] = useState('');
@@ -608,9 +583,6 @@ function SeccionVentas({ productos, ventas, dineroActual, cargarDatos }) {
   );
 }
 
-// ------------------------------------------------------------------
-// SECCIÓN 6: GASTOS (Tu código original)
-// ------------------------------------------------------------------
 function SeccionGastos({ gastos, dineroActual, cargarDatos }) {
   const [mostrarForm, setMostrarForm] = useState(false);
   const [busqueda, setBusqueda] = useState('');
@@ -783,9 +755,6 @@ function SeccionGastos({ gastos, dineroActual, cargarDatos }) {
   );
 }
 
-// ------------------------------------------------------------------
-// SECCIÓN 7: REINVERSIÓN (Tu código original)
-// ------------------------------------------------------------------
 function SeccionReinversion({ productos, reinversiones, dineroActual, cargarDatos }) {
   const [mostrarForm, setMostrarForm] = useState(false);
   const [productoReInversion, setProductoReInversion] = useState('');
@@ -941,9 +910,6 @@ function SeccionReinversion({ productos, reinversiones, dineroActual, cargarDato
   );
 }
 
-// ------------------------------------------------------------------
-// SECCIÓN 8: CORTE DE CAJA (Tu código original)
-// ------------------------------------------------------------------
 function SeccionCorte({ productos, ventas, gastos, reinversiones, dineroActual }) {
   const gananciaTotal = ventas.reduce((sum, venta) => {
     const producto = productos.find(p => p.id === venta.productoId);

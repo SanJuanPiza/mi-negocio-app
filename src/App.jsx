@@ -1,18 +1,141 @@
 import React, { useState, useEffect } from 'react';
-// NUEVO: Agregamos el ícono 'TrendingUp' para reinversión
-import { Plus, Edit2, Trash2, Package, ShoppingCart, DollarSign, Search, TrendingDown, TrendingUp } from 'lucide-react';
+// Íconos (incluyendo LogOut)
+import { Plus, Edit2, Trash2, Package, ShoppingCart, DollarSign, Search, TrendingDown, TrendingUp, LogOut } from 'lucide-react';
 import { supabase } from './supabaseClient'; 
 
 // ------------------------------------------------------------------
-// FUNCIÓN 1: COMPONENTE PRINCIPAL
+// COMPONENTE 1: Formulario de Login y Registro
+// ------------------------------------------------------------------
+function AuthForm() {
+  const [loading, setLoading] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isLogin, setIsLogin] = useState(true); // Para cambiar entre Login y Registro
+
+  const handleAuth = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      let error;
+      if (isLogin) {
+        // --- Iniciar Sesión ---
+        const { error: loginError } = await supabase.auth.signInWithPassword({
+          email: email,
+          password: password,
+        });
+        error = loginError;
+      } else {
+        // --- Registrarse ---
+        const { error: signUpError } = await supabase.auth.signUp({
+          email: email,
+          password: password,
+        });
+        error = signUpError;
+      }
+      if (error) throw error;
+      // Si todo sale bien, el 'onAuthStateChange' en <App> detectará el cambio
+      // y nos llevará a la app principal.
+    } catch (error) {
+      alert(error.error_description || error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-100">
+      <div className="p-8 bg-white shadow-lg rounded-lg w-full max-w-sm">
+        <h1 className="text-2xl font-bold text-center mb-6">
+          {isLogin ? 'Iniciar Sesión' : 'Registrar Cuenta'}
+        </h1>
+        <form onSubmit={handleAuth} className="space-y-4">
+          <input
+            type="email"
+            placeholder="tu-email@correo.com"
+            value={email}
+            required
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full p-3 border rounded-lg"
+          />
+          <input
+            type="password"
+            placeholder="Contraseña"
+            value={password}
+            required
+            onChange={(e) => setPassword(e.target.value)}
+            className="w-full p-3 border rounded-lg"
+          />
+          <button 
+            type="submit" 
+            disabled={loading} 
+            className="w-full py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:bg-blue-300"
+          >
+            {loading ? 'Cargando...' : (isLogin ? 'Entrar' : 'Registrar')}
+          </button>
+        </form>
+        <button
+          onClick={() => setIsLogin(!isLogin)}
+          className="w-full mt-4 text-center text-sm text-blue-600 hover:underline"
+        >
+          {isLogin ? '¿No tienes cuenta? Regístrate' : '¿Ya tienes cuenta? Inicia sesión'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------
+// COMPONENTE 2: El "Portero" (Principal)
 // ------------------------------------------------------------------
 export default function App() {
+  const [session, setSession] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    // 1. Intenta obtener la sesión actual al cargar la app
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setLoading(false); // Terminamos de cargar
+    });
+
+    // 2. Escucha cambios en la sesión (Login o Logout)
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setSession(session);
+        setLoading(false);
+      }
+    );
+
+    // 3. Limpia el "escuchador" al desmontar el componente
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+  // Si aún está cargando la sesión, muestra "Cargando..."
+  if (loading) {
+    return <div className="flex items-center justify-center h-screen">Cargando sesión...</div>;
+  }
+
+  // Si NO hay sesión, muestra el formulario de Login
+  if (!session) {
+    return <AuthForm />;
+  } 
+  
+  // Si SÍ hay sesión, muestra la app principal
+  return <BusinessApp user={session.user} />;
+}
+
+// ------------------------------------------------------------------
+// COMPONENTE 3: La App del Negocio (Toda tu app anterior)
+// ------------------------------------------------------------------
+function BusinessApp({ user }) {
   const [productos, setProductos] = useState([]);
   const [ventas, setVentas] = useState([]);
   const [dineroActual, setDineroActual] = useState(0);
   const [gastos, setGastos] = useState([]);
-  const [reinversiones, setReinversiones] = useState([]); // NUEVO ESTADO
-  const [seccionActual, setSeccionActual] = useState('inventario'); // inventario, ventas, gastos, reinversion, corte
+  const [reinversiones, setReinversiones] = useState([]);
+  const [seccionActual, setSeccionActual] = useState('inventario');
   const [cargando, setCargando] = useState(true);
 
   useEffect(() => {
@@ -40,7 +163,7 @@ export default function App() {
       if (errorGastos) throw errorGastos;
       if (gastosData) setGastos(gastosData);
 
-      // 4. Cargar Reinversiones (NUEVO)
+      // 4. Cargar Reinversiones
       const { data: reinversionesData, error: errorReinversiones } = await supabase
         .from('reinversiones').select('*').order('created_at', { ascending: false });
       if (errorReinversiones) throw errorReinversiones;
@@ -54,24 +177,43 @@ export default function App() {
 
     } catch (error) {
       console.error('Error cargando datos: ', error.message);
-      alert('Error al cargar datos. Revisa la consola.'); 
     }
     setCargando(false);
   };
 
+  // NUEVA FUNCIÓN: Cerrar Sesión
+  const handleLogout = async () => {
+    setCargando(true);
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      alert('Error al cerrar sesión:', error.message);
+      setCargando(false);
+    }
+  };
+
   if (cargando) {
-    return <div className="flex items-center justify-center h-screen">
-      <div className="text-xl">Cargando...</div>
-    </div>;
+    return <div className="flex items-center justify-center h-screen">Cargando datos...</div>;
   }
 
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Menú de navegación */}
       <div className="bg-blue-600 text-white p-4 sticky top-0 z-10 shadow-lg">
-        <h1 className="text-2xl font-bold mb-4">Mi Negocio</h1>
+        {/* Fila superior con Título y Botón Logout */}
+        <div className="flex justify-between items-center mb-4">
+          <h1 className="text-2xl font-bold">Mi Negocio</h1>
+          <button
+            onClick={handleLogout}
+            title="Cerrar Sesión"
+            className="px-3 py-2 rounded bg-red-500 hover:bg-red-600 flex items-center gap-2"
+          >
+            <LogOut size={18} />
+            <span className="hidden md:block">Salir</span>
+          </button>
+        </div>
+        
+        {/* Fila inferior con botones de navegación */}
         <div className="flex gap-2 overflow-x-auto">
-          {/* Botón Inventario */}
           <button
             onClick={() => setSeccionActual('inventario')}
             className={`px-4 py-2 rounded flex items-center gap-2 whitespace-nowrap ${
@@ -80,7 +222,6 @@ export default function App() {
           >
             <Package size={20} /> Inventario
           </button>
-          {/* Botón Ventas */}
           <button
             onClick={() => setSeccionActual('ventas')}
             className={`px-4 py-2 rounded flex items-center gap-2 whitespace-nowrap ${
@@ -89,8 +230,6 @@ export default function App() {
           >
             <ShoppingCart size={20} /> Ventas
           </button>
-          
-          {/* Botón Gastos */}
           <button
             onClick={() => setSeccionActual('gastos')}
             className={`px-4 py-2 rounded flex items-center gap-2 whitespace-nowrap ${
@@ -99,8 +238,6 @@ export default function App() {
           >
             <TrendingDown size={20} /> Gastos
           </button>
-
-          {/* Botón Reinversión (NUEVO) */}
           <button
             onClick={() => setSeccionActual('reinversion')}
             className={`px-4 py-2 rounded flex items-center gap-2 whitespace-nowrap ${
@@ -109,8 +246,6 @@ export default function App() {
           >
             <TrendingUp size={20} /> Reinversión
           </button>
-
-          {/* Botón Corte */}
           <button
             onClick={() => setSeccionActual('corte')}
             className={`px-4 py-2 rounded flex items-center gap-2 whitespace-nowrap ${
@@ -122,60 +257,33 @@ export default function App() {
         </div>
       </div>
 
-      {/* Contenido según la sección activa */}
+      {/* Contenido */}
       <div className="p-4">
         {seccionActual === 'inventario' && (
-          <SeccionInventario 
-            productos={productos} 
-            cargarDatos={cargarDatos}
-          />
+          <SeccionInventario productos={productos} cargarDatos={cargarDatos} />
         )}
         {seccionActual === 'ventas' && (
-          <SeccionVentas 
-            productos={productos}
-            ventas={ventas}
-            dineroActual={dineroActual}
-            cargarDatos={cargarDatos}
-          />
+          <SeccionVentas productos={productos} ventas={ventas} dineroActual={dineroActual} cargarDatos={cargarDatos} />
         )}
-        
         {seccionActual === 'gastos' && (
-          <SeccionGastos
-            gastos={gastos}
-            dineroActual={dineroActual}
-            cargarDatos={cargarDatos}
-          />
+          <SeccionGastos gastos={gastos} dineroActual={dineroActual} cargarDatos={cargarDatos} />
         )}
-
-        {/* SECCIÓN REINVERSIÓN (NUEVO) */}
         {seccionActual === 'reinversion' && (
-          <SeccionReinversion
-            productos={productos}
-            reinversiones={reinversiones}
-            dineroActual={dineroActual}
-            cargarDatos={cargarDatos}
-          />
+          <SeccionReinversion productos={productos} reinversiones={reinversiones} dineroActual={dineroActual} cargarDatos={cargarDatos} />
         )}
-        
         {seccionActual === 'corte' && (
-          <SeccionCorte 
-            productos={productos}
-            ventas={ventas}
-            gastos={gastos}
-            reinversiones={reinversiones} // <- Pasamos las reinversiones
-            dineroActual={dineroActual}
-          />
+          <SeccionCorte productos={productos} ventas={ventas} gastos={gastos} reinversiones={reinversiones} dineroActual={dineroActual} />
         )}
       </div>
     </div>
   );
 }
 
+
 // ------------------------------------------------------------------
-// FUNCIÓN 2: SECCIÓN INVENTARIO (Sin cambios)
+// SECCIÓN 4: INVENTARIO (Tu código original)
 // ------------------------------------------------------------------
 function SeccionInventario({ productos, cargarDatos }) {
-  // ... (código sin cambios) ...
   const [mostrarForm, setMostrarForm] = useState(false);
   const [productoEditando, setProductoEditando] = useState(null);
   const [busqueda, setBusqueda] = useState('');
@@ -190,36 +298,29 @@ function SeccionInventario({ productos, cargarDatos }) {
       alert('Por favor llena todos los campos');
       return;
     }
-
     const productoDatos = {
       nombre,
       cantidad: parseInt(cantidad),
       precioVenta: parseFloat(precioVenta),
       precioCompra: parseFloat(precioCompra)
     };
-
     try {
       if (productoEditando) {
         const { error } = await supabase
           .from('productos')
           .update(productoDatos)
           .eq('id', productoEditando.id); 
-        
         if (error) throw error;
         alert('¡Producto actualizado!');
-
       } else {
         const { error } = await supabase
           .from('productos')
           .insert(productoDatos);
-        
         if (error) throw error;
         alert('¡Producto guardado!');
       }
-
       limpiarFormulario();
       cargarDatos(); 
-
     } catch (error) {
       console.error('Error guardando producto:', error.message);
       alert('Error al guardar el producto.');
@@ -233,12 +334,9 @@ function SeccionInventario({ productos, cargarDatos }) {
           .from('productos')
           .delete()
           .eq('id', id); 
-
         if (error) throw error;
-        
         alert('Producto eliminado.');
         cargarDatos(); 
-
       } catch (error) {
         console.error('Error eliminando producto:', error.message);
         alert('Error al eliminar el producto.');
@@ -270,7 +368,6 @@ function SeccionInventario({ productos, cargarDatos }) {
 
   return (
     <div>
-      {/* Buscador */}
       <div className="mb-4 relative">
         <Search className="absolute left-3 top-3 text-gray-400" size={20} />
         <input
@@ -281,16 +378,12 @@ function SeccionInventario({ productos, cargarDatos }) {
           className="w-full pl-10 pr-4 py-2 border rounded-lg"
         />
       </div>
-
-      {/* Botón para agregar producto */}
       <button
         onClick={() => setMostrarForm(!mostrarForm)}
         className="w-full bg-green-500 text-white py-3 rounded-lg mb-4 flex items-center justify-center gap-2 font-semibold"
       >
         <Plus size={20} /> {mostrarForm ? 'Ocultar Formulario' : 'Agregar Producto'}
       </button>
-
-      {/* Formulario para agregar/editar producto */}
       {mostrarForm && (
         <div className="bg-white p-4 rounded-lg shadow-md mb-4">
           <h3 className="font-bold text-lg mb-3">
@@ -344,8 +437,6 @@ function SeccionInventario({ productos, cargarDatos }) {
           </div>
         </div>
       )}
-
-      {/* Lista de productos */}
       <div className="space-y-3">
         {productosFiltrados.length === 0 ? (
           <div className="text-center text-gray-500 py-8">
@@ -391,10 +482,9 @@ function SeccionInventario({ productos, cargarDatos }) {
 }
 
 // ------------------------------------------------------------------
-// FUNCIÓN 3: SECCIÓN VENTAS (Sin cambios)
+// SECCIÓN 5: VENTAS (Tu código original)
 // ------------------------------------------------------------------
 function SeccionVentas({ productos, ventas, dineroActual, cargarDatos }) {
-  // ... (código sin cambios) ...
   const [productoSeleccionado, setProductoSeleccionado] = useState('');
   const [cantidadVenta, setCantidadVenta] = useState('');
 
@@ -403,15 +493,12 @@ function SeccionVentas({ productos, ventas, dineroActual, cargarDatos }) {
       alert('Selecciona un producto y cantidad');
       return;
     }
-
     const producto = productos.find(p => p.id === parseInt(productoSeleccionado));
     const cantidad = parseInt(cantidadVenta);
-
     if (cantidad > producto.cantidad) {
       alert('No hay suficiente stock');
       return;
     }
-
     const nuevaVenta = {
       productoId: producto.id,
       nombreProducto: producto.nombre,
@@ -419,57 +506,44 @@ function SeccionVentas({ productos, ventas, dineroActual, cargarDatos }) {
       precioUnitario: producto.precioVenta,
       total: producto.precioVenta * cantidad,
     };
-    
     const nuevoStock = producto.cantidad - cantidad;
     const nuevoDinero = dineroActual + nuevaVenta.total;
-
     try {
-      // Op 1: Insertar Venta
       const { error: errorVenta } = await supabase
         .from('ventas')
         .insert(nuevaVenta);
       if (errorVenta) throw errorVenta;
-
-      // Op 2: Actualizar Stock
       const { error: errorProducto } = await supabase
         .from('productos')
         .update({ cantidad: nuevoStock })
         .eq('id', producto.id);
       if (errorProducto) throw errorProducto;
-
-      // Op 3: Actualizar Dinero
       const { error: errorDinero } = await supabase
         .from('dinero')
         .update({ monto: nuevoDinero })
         .eq('id', 1); 
       if (errorDinero) throw errorDinero;
-
       alert('¡Venta registrada exitosamente!');
       setProductoSeleccionado('');
       setCantidadVenta('');
       cargarDatos(); 
-
     } catch (error) {
       console.error('Error al registrar venta:', error.message);
       alert('Error al registrar la venta. La operación se canceló.');
     }
   };
 
-  // Calcular total de ventas del día
-  const hoy = new Date().toISOString().split('T')[0]; // Formato YYYY-MM-DD
+  const hoy = new Date().toISOString().split('T')[0];
   const ventasHoy = ventas.filter(v => v.created_at.startsWith(hoy));
   const totalHoy = ventasHoy.reduce((sum, v) => sum + v.total, 0);
 
   return (
     <div>
-      {/* Resumen de ventas del día */}
       <div className="bg-green-500 text-white p-4 rounded-lg mb-4">
         <h3 className="text-lg font-semibold">Ventas de Hoy</h3>
         <p className="text-3xl font-bold">${totalHoy.toFixed(2)}</p>
         <p className="text-sm">{ventasHoy.length} transacciones</p>
       </div>
-
-      {/* Formulario de venta */}
       <div className="bg-white p-4 rounded-lg shadow-md mb-4">
         <h3 className="font-bold text-lg mb-3">Registrar Venta</h3>
         <div className="space-y-3">
@@ -509,8 +583,6 @@ function SeccionVentas({ productos, ventas, dineroActual, cargarDatos }) {
           </button>
         </div>
       </div>
-
-      {/* Historial de ventas */}
       <h3 className="font-bold text-lg mb-3">Historial de Ventas</h3>
       <div className="space-y-2">
         {ventas.length === 0 ? (
@@ -537,88 +609,64 @@ function SeccionVentas({ productos, ventas, dineroActual, cargarDatos }) {
 }
 
 // ------------------------------------------------------------------
-// FUNCIÓN 4: SECCIÓN GASTOS (Sin cambios)
+// SECCIÓN 6: GASTOS (Tu código original)
 // ------------------------------------------------------------------
 function SeccionGastos({ gastos, dineroActual, cargarDatos }) {
-  // ... (código sin cambios) ...
   const [mostrarForm, setMostrarForm] = useState(false);
   const [busqueda, setBusqueda] = useState('');
-  
-  // Estados del formulario
   const [concepto, setConcepto] = useState('');
   const [monto, setMonto] = useState('');
 
-  // Función para registrar un gasto
   const registrarGasto = async () => {
     if (!concepto || !monto) {
       alert('Por favor llena todos los campos');
       return;
     }
-    
     const montoGasto = parseFloat(monto);
-
     if (montoGasto > dineroActual) {
       alert('No hay suficiente dinero en caja para registrar este gasto.');
       return;
     }
-
-    // 1. Prepara el objeto para Supabase
     const gastoDatos = {
       concepto,
       monto: montoGasto
     };
-    
-    // 2. Calcula el nuevo dinero en caja
     const nuevoDinero = dineroActual - montoGasto;
-
     try {
-      // --- OPERACIÓN 1: Insertar el Gasto ---
       const { error: errorGasto } = await supabase
         .from('gastos')
         .insert(gastoDatos);
       if (errorGasto) throw errorGasto;
-        
-      // --- OPERACIÓN 2: Actualizar el Dinero en Caja ---
       const { error: errorDinero } = await supabase
         .from('dinero')
         .update({ monto: nuevoDinero })
-        .eq('id', 1); // Actualiza la fila con id 1
+        .eq('id', 1); 
       if (errorDinero) throw errorDinero;
-      
       alert('¡Gasto registrado!');
       limpiarFormulario();
-      cargarDatos(); // Vuelve a cargar todos los datos
-
+      cargarDatos(); 
     } catch (error) {
       console.error('Error registrando gasto:', error.message);
       alert('Error al registrar el gasto.');
     }
   };
 
-  // Función para eliminar gasto
   const eliminarGasto = async (gasto) => {
     if (confirm('¿Seguro que quieres eliminar este gasto? (Esto devolverá el dinero a la caja)')) {
-      
       const nuevoDinero = dineroActual + gasto.monto;
-      
       try {
-        // --- OPERACIÓN 1: Eliminar el Gasto ---
         const { error: errorGasto } = await supabase
           .from('gastos')
           .delete()
           .eq('id', gasto.id); 
         if (errorGasto) throw errorGasto;
-        
-        // --- OPERACIÓN 2: Devolver el Dinero a Caja ---
         const { error: errorDinero } = await supabase
           .from('dinero')
           .update({ monto: nuevoDinero })
           .eq('id', 1);
         if (errorDinero) throw errorDinero;
-
         alert('Gasto eliminado y dinero devuelto a caja.');
         cargarDatos(); 
-
       } catch (error) {
         console.error('Error eliminando gasto:', error.message);
         alert('Error al eliminar el gasto.');
@@ -626,33 +674,27 @@ function SeccionGastos({ gastos, dineroActual, cargarDatos }) {
     }
   };
   
-  // Limpiar formulario
   const limpiarFormulario = () => {
     setConcepto('');
     setMonto('');
     setMostrarForm(false);
   };
 
-  // Filtrar gastos por búsqueda
   const gastosFiltrados = gastos.filter(g => 
     g.concepto.toLowerCase().includes(busqueda.toLowerCase())
   );
   
-  // Calcular total de gastos del día
-  const hoy = new Date().toISOString().split('T')[0]; // Formato YYYY-MM-DD
+  const hoy = new Date().toISOString().split('T')[0];
   const gastosHoy = gastos.filter(g => g.created_at.startsWith(hoy));
   const totalHoy = gastosHoy.reduce((sum, g) => sum + g.monto, 0);
 
   return (
     <div>
-      {/* Resumen de gastos del día */}
       <div className="bg-red-500 text-white p-4 rounded-lg mb-4">
         <h3 className="text-lg font-semibold">Gastos de Hoy</h3>
         <p className="text-3xl font-bold">${totalHoy.toFixed(2)}</p>
         <p className="text-sm">{gastosHoy.length} registros</p>
       </div>
-      
-      {/* Buscador */}
       <div className="mb-4 relative">
         <Search className="absolute left-3 top-3 text-gray-400" size={20} />
         <input
@@ -663,16 +705,12 @@ function SeccionGastos({ gastos, dineroActual, cargarDatos }) {
           className="w-full pl-10 pr-4 py-2 border rounded-lg"
         />
       </div>
-
-      {/* Botón para agregar gasto */}
       <button
         onClick={() => setMostrarForm(!mostrarForm)}
         className="w-full bg-red-500 text-white py-3 rounded-lg mb-4 flex items-center justify-center gap-2 font-semibold"
       >
         <Plus size={20} /> {mostrarForm ? 'Ocultar Formulario' : 'Registrar Gasto'}
       </button>
-
-      {/* Formulario para agregar gasto */}
       {mostrarForm && (
         <div className="bg-white p-4 rounded-lg shadow-md mb-4">
           <h3 className="font-bold text-lg mb-3">Nuevo Gasto</h3>
@@ -709,8 +747,6 @@ function SeccionGastos({ gastos, dineroActual, cargarDatos }) {
           </div>
         </div>
       )}
-
-      {/* Historial de Gastos */}
       <h3 className="font-bold text-lg mb-3">Historial de Gastos</h3>
       <div className="space-y-3">
         {gastosFiltrados.length === 0 ? (
@@ -748,99 +784,77 @@ function SeccionGastos({ gastos, dineroActual, cargarDatos }) {
 }
 
 // ------------------------------------------------------------------
-// FUNCIÓN 5: SECCIÓN REINVERSIÓN (¡COMPONENTE NUEVO!)
+// SECCIÓN 7: REINVERSIÓN (Tu código original)
 // ------------------------------------------------------------------
 function SeccionReinversion({ productos, reinversiones, dineroActual, cargarDatos }) {
   const [mostrarForm, setMostrarForm] = useState(false);
   const [productoReInversion, setProductoReInversion] = useState('');
   const [cantidadReInversion, setCantidadReInversion] = useState('');
 
-  // Esta es la lógica que movimos de 'SeccionCorte'
   const registrarReInversion = async () => {
     if (!productoReInversion || !cantidadReInversion) {
       alert('Selecciona un producto y cantidad');
       return;
     }
-
     const producto = productos.find(p => p.id === parseInt(productoReInversion));
     const cantidad = parseInt(cantidadReInversion);
     const costoUnitario = producto.precioCompra;
     const costoTotal = costoUnitario * cantidad;
-
     if (costoTotal > dineroActual) {
       alert('No hay suficiente dinero para esta reinversión');
       return;
     }
-
-    // 1. Preparar datos para el historial
     const reinversionDatos = {
       nombreProducto: producto.nombre,
       cantidadComprada: cantidad,
       costoUnitario: costoUnitario,
       costoTotal: costoTotal
     };
-
-    // 2. Preparar datos para actualizar
     const nuevoStock = producto.cantidad + cantidad;
     const nuevoDinero = dineroActual - costoTotal;
-
     try {
-      // --- OPERACIÓN 1: Insertar en el Historial de Reinversiones ---
       const { error: errorReinversion } = await supabase
         .from('reinversiones')
         .insert(reinversionDatos);
       if (errorReinversion) throw errorReinversion;
-
-      // --- OPERACIÓN 2: Actualizar el Stock del Producto ---
       const { error: errorProducto } = await supabase
         .from('productos')
         .update({ cantidad: nuevoStock })
         .eq('id', producto.id);
       if (errorProducto) throw errorProducto;
-
-      // --- OPERACIÓN 3: Actualizar el Dinero en Caja ---
       const { error: errorDinero } = await supabase
         .from('dinero')
         .update({ monto: nuevoDinero })
         .eq('id', 1); 
       if (errorDinero) throw errorDinero;
-
-      // ¡Todo salió bien!
       alert('¡Reinversión registrada!');
       setProductoReInversion('');
       setCantidadReInversion('');
       setMostrarForm(false);
-      cargarDatos(); // Recarga toda la información
-
+      cargarDatos(); 
     } catch (error) {
       console.error('Error al registrar reinversión:', error.message);
       alert('Error al registrar la reinversión.');
     }
   };
   
-  // Calcular total de reinversiones del día
-  const hoy = new Date().toISOString().split('T')[0]; // Formato YYYY-MM-DD
+  const hoy = new Date().toISOString().split('T')[0];
   const reinversionesHoy = reinversiones.filter(r => r.created_at.startsWith(hoy));
   const totalHoy = reinversionesHoy.reduce((sum, r) => sum + r.costoTotal, 0);
   
   return (
     <div>
-      {/* Resumen de reinversiones del día */}
       <div className="bg-orange-500 text-white p-4 rounded-lg mb-4">
         <h3 className="text-lg font-semibold">Reinversión de Hoy</h3>
         <p className="text-3xl font-bold">${totalHoy.toFixed(2)}</p>
         <p className="text-sm">{reinversionesHoy.length} registros</p>
       </div>
-
-      {/* Botón de reinversión */}
       <button
         onClick={() => setMostrarForm(!mostrarForm)}
         className="w-full bg-orange-500 text-white py-3 rounded-lg mb-4 flex items-center justify-center gap-2 font-semibold"
       >
         <Plus size={20} /> {mostrarForm ? 'Ocultar Formulario' : 'Registrar Reinversión'}
       </button>
-
-      {/* Formulario de reinversión */}
       {mostrarForm && (
         <div className="bg-white p-4 rounded-lg shadow-md mb-4">
           <h3 className="font-bold text-lg mb-3">Reinversión en Inventario</h3>
@@ -894,8 +908,6 @@ function SeccionReinversion({ productos, reinversiones, dineroActual, cargarDato
           </div>
         </div>
       )}
-      
-      {/* Historial de Reinversiones */}
       <h3 className="font-bold text-lg mb-3">Historial de Reinversiones</h3>
       <div className="space-y-3">
         {reinversiones.length === 0 ? (
@@ -929,12 +941,10 @@ function SeccionReinversion({ productos, reinversiones, dineroActual, cargarDato
   );
 }
 
-
 // ------------------------------------------------------------------
-// FUNCIÓN 6: SECCIÓN CORTE (¡ACTUALIZADA!)
+// SECCIÓN 8: CORTE DE CAJA (Tu código original)
 // ------------------------------------------------------------------
 function SeccionCorte({ productos, ventas, gastos, reinversiones, dineroActual }) {
-  // Calculamos ganancia (igual)
   const gananciaTotal = ventas.reduce((sum, venta) => {
     const producto = productos.find(p => p.id === venta.productoId);
     if (producto) {
@@ -944,13 +954,9 @@ function SeccionCorte({ productos, ventas, gastos, reinversiones, dineroActual }
     return sum;
   }, 0);
   
-  // Calculamos gastos (igual)
   const gastosTotales = gastos.reduce((sum, gasto) => sum + gasto.monto, 0);
-
-  // Calculamos reinversiones (NUEVO)
   const reinversionesTotales = reinversiones.reduce((sum, r) => sum + r.costoTotal, 0);
 
-  // Top productos (igual)
   const productosVendidos = {};
   ventas.forEach(venta => {
     if (productosVendidos[venta.nombreProducto]) {
@@ -965,7 +971,6 @@ function SeccionCorte({ productos, ventas, gastos, reinversiones, dineroActual }
 
   return (
     <div>
-      {/* Resumen financiero (ACTUALIZADO) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
         <div className="bg-blue-500 text-white p-4 rounded-lg">
           <h3 className="text-sm font-semibold">Dinero Actual</h3>
@@ -975,26 +980,19 @@ function SeccionCorte({ productos, ventas, gastos, reinversiones, dineroActual }
           <h3 className="text-sm font-semibold">Ganancia Bruta (Ventas)</h3>
           <p className="text-3xl font-bold">${gananciaTotal.toFixed(2)}</p>
         </div>
-        
         <div className="bg-red-500 text-white p-4 rounded-lg">
           <h3 className="text-sm font-semibold">Gastos Totales</h3>
           <p className="text-3xl font-bold">-${gastosTotales.toFixed(2)}</p>
         </div>
-        
-        {/* Tarjeta Total Reinvertido (NUEVO) */}
         <div className="bg-orange-500 text-white p-4 rounded-lg">
           <h3 className="text-sm font-semibold">Total Reinvertido</h3>
           <p className="text-3xl font-bold">-${reinversionesTotales.toFixed(2)}</p>
         </div>
-
-        {/* Ganancia Neta (Ahora resta los gastos) */}
         <div className="bg-purple-500 text-white p-4 rounded-lg md:col-span-2">
           <h3 className="text-sm font-semibold">Ganancia Neta (Ganancia Bruta - Gastos)</h3>
           <p className="text-3xl font-bold">${(gananciaTotal - gastosTotales).toFixed(2)}</p>
         </div>
       </div>
-
-      {/* Top productos (igual) */}
       <div className="bg-white p-4 rounded-lg shadow-md mb-4">
         <h3 className="font-bold text-lg mb-3">Productos Más Vendidos</h3>
          {topProductos.length === 0 ? (
@@ -1010,8 +1008,6 @@ function SeccionCorte({ productos, ventas, gastos, reinversiones, dineroActual }
           </div>
         )}
       </div>
-
-      {/* Productos con poco stock (igual) */}
       <div className="bg-white p-4 rounded-lg shadow-md">
         <h3 className="font-bold text-lg mb-3">Alerta de Stock Bajo</h3>
         {productos.filter(p => p.cantidad <= 5).length === 0 ? (
